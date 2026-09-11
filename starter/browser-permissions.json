@@ -1,0 +1,16 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UseBuiltInBrowser",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:GetBrowserSession",
+        "bedrock-agentcore:StopBrowserSession",
+        "bedrock-agentcore:ConnectBrowserAutomationStream"
+      ],
+      "Resource": "arn:aws:bedrock-agentcore:us-east-1:aws:browser/aws.browser.v1"
+    }
+  ]
+}
