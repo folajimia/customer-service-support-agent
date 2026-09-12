@@ -64,7 +64,7 @@ os.environ["BYPASS_TOOL_CONSENT"] = "true"
 # REGION:     your AWS region, e.g. "us-east-1"
 # MEMORY_ID   format: shown in the AgentCore Memory console
 
-GATEWAY_URL = "https://customersupportgateway-pvgzfsbn7h.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"   # TODO: Replace with your Gateway URL
+GATEWAY_URL = "https://customersupportgateway-pvgzfsbn7h.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"   # Replace with your Gateway URL
 KB_ID       = "AJCWPAJ1SJ"
 REGION      = "us-east-1"
 MEMORY_ID   = "CustomerSupportMemory-aC6PFp8xLZ"
@@ -582,30 +582,63 @@ async def invoke(payload, context=None):
             lambda: streamable_http_client(GATEWAY_URL)
         )
 
-        # Keep the MCP connection open while the agent uses its tools
-        with gateway_client:
-            gateway_tools = gateway_client.list_tools_sync()
-            tools.extend(gateway_tools)
+        try:
+            # Keep the MCP connection open while the agent uses its tools
+            with gateway_client:
+                gateway_tools = gateway_client.list_tools_sync()
+                tools.extend(gateway_tools)
 
-            # 6. Create and invoke the agent
-            agent = Agent(
-                system_prompt=SYSTEM_PROMPT,
-                tools=tools,
-                hooks=[memory_hook],
-                state={
-                    "actor_id": actor_id,
-                    "session_id": session_id,
-                },
+                # 6. Create the agent
+                agent = Agent(
+                    system_prompt=SYSTEM_PROMPT,
+                    tools=tools,
+                    hooks=[memory_hook],
+                    state={
+                        "actor_id": actor_id,
+                        "session_id": session_id,
+                    },
+                )
+
+                try:
+                    response = await agent.invoke_async(user_input)
+                except Exception:
+                    # A Gateway tool call failed mid-turn (execution error,
+                    # dropped connection, etc.). Log full details server-side
+                    # only — never echo the raw exception to the customer.
+                    logger.exception(
+                        "Gateway tool call failed during agent invocation"
+                    )
+                    return (
+                        "I couldn't complete that request because one of the "
+                        "order/account tools failed while running. Please try "
+                        "again in a moment, or rephrase your request."
+                    )
+
+        except (TimeoutError, ConnectionError, OSError):
+            # Couldn't reach the Gateway at all (network/DNS/timeout).
+            logger.exception("Gateway connection failed")
+            return (
+                "I couldn't connect to the tools service (Gateway) needed to "
+                "look up order or account details right now. Please try again "
+                "shortly; if this keeps happening, ask support to check the "
+                "Gateway's status and configuration."
             )
-
-            response = await agent.invoke_async(user_input)
+        except Exception:
+            # Any other failure while connecting or listing Gateway tools
+            # (e.g. auth/config error). Details go to the log, not the user.
+            logger.exception("Gateway setup failed")
+            return (
+                "I ran into a problem setting up the tools I need (via the "
+                "Gateway), so I can't complete that request right now. Please "
+                "try again, or check the Gateway configuration if it persists."
+            )
 
         # 7. Return the first text block
         return response.message["content"][0]["text"]
 
     # 8. Handle errors gracefully
-    except Exception as error:
-        print(f"Agent invocation failed: {error}")
+    except Exception:
+        logger.exception("Agent invocation failed")
 
         return (
             "Sorry, I was unable to process your request. "
